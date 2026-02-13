@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,8 +48,7 @@ type GPUStatus struct {
 //
 // +genclient
 // +genclient:nonNamespaced
-// +genclient:onlyVerbs=get,list,watch,create,update,delete
-// +genclient:noStatus
+// +genclient:onlyVerbs=get,list,watch,create,update,updateStatus,delete
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type GPU struct {

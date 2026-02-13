@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -55,6 +55,9 @@ func CreateUDSListener(ctx context.Context, socketPath string, perm os.FileMode)
 
 	lc := net.ListenConfig{}
 
+	// Note: There is a residual TOCTOU window between CleanupUDS and Listen.
+	// This is acceptable because Listen will fail with EADDRINUSE if another
+	// process binds the socket in that window.
 	lis, err := lc.Listen(ctx, "unix", socketPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to listen on unix socket %q: %w", socketPath, err)

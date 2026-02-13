@@ -26,6 +26,13 @@ code-quality-report.json
 go.work
 go.work.sum
 
+# Local tool binaries (managed by api/Makefile)
+api/bin/*
+
+# Server binary output
+bin/
+/device-api-server
+
 # ==============================================================================
 # IDE & Editor Configurations
 # ==============================================================================
@@ -48,3 +55,9 @@ go.work.sum
 # Emacs
 *~
 \#*\#
+
+
+# ==============================================================================
+# Git Worktrees
+# ==============================================================================
+.worktrees/

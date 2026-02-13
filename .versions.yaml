@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +34,6 @@ go_tools:
 
 # Protocol Buffers / gRPC
 protobuf:
-  protobuf: 'v33.0'
+  protobuf: 'v33.4'
   protoc_gen_go: 'v1.36.10'
   protoc_gen_go_grpc: 'v1.5.1'

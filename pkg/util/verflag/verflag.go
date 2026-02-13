@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"text/tabwriter"
 
-	"github.com/nvidia/nvsentinel/pkg/util/version"
+	"github.com/nvidia/nvsentinel/pkg/version"
 	"github.com/spf13/pflag"
 )
 
@@ -111,7 +111,7 @@ func printVersionTable() {
 
 	fmt.Fprintf(w, "%s\n", programName)
 	fmt.Fprintf(w, "---\t---\n")
-	fmt.Fprintf(w, "Version\t%s\n", v.GitVersion)
+	fmt.Fprintf(w, "Version\t%s\n", v.Version)
 	fmt.Fprintf(w, "GitCommit\t%s\n", v.GitCommit)
 	fmt.Fprintf(w, "BuildDate\t%s\n", v.BuildDate)
 	fmt.Fprintf(w, "GoVersion\t%s\n", v.GoVersion)

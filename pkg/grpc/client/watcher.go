@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc/codes"
@@ -64,17 +66,16 @@ func NewWatcher(
 	return w
 }
 
-// Stop cancels the context and closes the event source.
+// Stop signals the receive loop to exit, cancels the context, and closes the event source.
 func (w *Watcher) Stop() {
 	w.stopOnce.Do(func() {
 		w.logger.V(4).Info("Stopping watcher")
-		w.cancel()
+		close(w.done) // Signal receive loop to exit first
+		w.cancel()    // Cancel the context
 
 		if err := w.source.Close(); err != nil {
 			w.logger.V(4).Info("Error closing source during stop", "err", err)
 		}
-
-		close(w.done)
 	})
 }
 
@@ -125,7 +126,7 @@ func (w *Watcher) receive() {
 
 			return
 		default:
-			w.logger.V(2).Info("Skipping unknown event type from server", "rawType", typeStr)
+			w.logger.V(1).Info("Skipping unknown event type from server", "rawType", typeStr)
 			continue
 		}
 
@@ -141,17 +142,26 @@ func (w *Watcher) receive() {
 					"resourceVersion", meta.GetResourceVersion(),
 				)
 			}
+		case <-time.After(30 * time.Second):
+			w.logger.Error(nil, "Event send timed out; consumer not reading, stopping watcher")
+			return
 		}
 	}
 }
 
 func (w *Watcher) sendError(err error) {
 	st := status.Convert(err)
-
 	code := st.Code()
+
+	// Log full error details at debug level only
+	w.logger.V(4).Info("Watch stream error",
+		"code", code,
+		"serverMessage", st.Message(),
+	)
+
 	statusErr := &metav1.Status{
 		Status:  metav1.StatusFailure,
-		Message: st.Message(),
+		Message: fmt.Sprintf("watch stream error: %s", code.String()),
 		Code:    int32(code), // #nosec G115
 	}
 
@@ -181,5 +191,7 @@ func (w *Watcher) sendError(err error) {
 	case <-w.done:
 		w.logger.V(4).Info("Watcher already done, dropping error event")
 	case w.result <- watch.Event{Type: watch.Error, Object: statusErr}:
+	case <-time.After(5 * time.Second):
+		w.logger.V(2).Info("Error event send timed out, dropping")
 	}
 }

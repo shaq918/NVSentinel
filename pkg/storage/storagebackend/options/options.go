@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -28,6 +28,10 @@ import (
 )
 
 type Options struct {
+	// InMemory skips the Kine/SQLite storage backend entirely.
+	// When true, services provide their own in-memory storage.Interface.
+	InMemory bool
+
 	DatabasePath                string
 	CompactionInterval          time.Duration
 	CompactionBatchSize         int64
@@ -49,6 +53,7 @@ type CompletedOptions struct {
 
 func NewOptions() *Options {
 	return &Options{
+		InMemory:                    true,
 		DatabasePath:                "/var/lib/nvidia-device-api/state.db",
 		CompactionInterval:          5 * time.Minute,
 		CompactionBatchSize:         1000,
@@ -64,6 +69,9 @@ func (o *Options) AddFlags(fss *cliflag.NamedFlagSets) {
 
 	storageFs := fss.FlagSet("storage")
 
+	storageFs.BoolVar(&o.InMemory, "in-memory", o.InMemory,
+		"Use in-memory storage instead of SQLite/Kine. Services provide their own storage.Interface.")
+
 	storageFs.StringVar(&o.DatabasePath, "database-path", o.DatabasePath,
 		"The path to the SQLite database file. Must be an absolute path.")
 
@@ -78,6 +86,12 @@ func (o *Options) AddFlags(fss *cliflag.NamedFlagSets) {
 func (o *Options) Complete() (CompletedOptions, error) {
 	if o == nil {
 		return CompletedOptions{}, nil
+	}
+
+	// In-memory mode skips all Kine/SQLite configuration.
+	if o.InMemory {
+		completed := completedOptions{Options: *o}
+		return CompletedOptions{completedOptions: &completed}, nil
 	}
 
 	if o.KineSocketPath == "" {
@@ -124,6 +138,11 @@ func (o *Options) Complete() (CompletedOptions, error) {
 //nolint:gocyclo,cyclop
 func (o *Options) Validate() []error {
 	if o == nil {
+		return nil
+	}
+
+	// In-memory mode requires no Kine/SQLite configuration.
+	if o.InMemory {
 		return nil
 	}
 

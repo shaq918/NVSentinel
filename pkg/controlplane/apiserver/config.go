@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import (
 	"github.com/nvidia/nvsentinel/pkg/controlplane/apiserver/metrics"
 	"github.com/nvidia/nvsentinel/pkg/controlplane/apiserver/options"
 	"github.com/nvidia/nvsentinel/pkg/controlplane/apiserver/registry"
-	"github.com/nvidia/nvsentinel/pkg/util/version"
+	"github.com/nvidia/nvsentinel/pkg/version"
 )
 
 type Config struct {

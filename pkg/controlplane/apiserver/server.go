@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import (
 	"github.com/nvidia/nvsentinel/pkg/controlplane/apiserver/metrics"
 	"github.com/nvidia/nvsentinel/pkg/storage/storagebackend"
 	netutils "github.com/nvidia/nvsentinel/pkg/util/net"
-	"github.com/nvidia/nvsentinel/pkg/util/version"
+	"github.com/nvidia/nvsentinel/pkg/version"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
@@ -36,6 +36,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
 
@@ -51,7 +52,6 @@ type DeviceAPIServer struct {
 	AdminServer      *grpc.Server
 	AdminCleanup     func()
 	Metrics          *metrics.ServerMetrics
-	MetricsRegistry  *prometheus.Registry
 	Storage          *storagebackend.Storage
 	ServiceProviders []api.ServiceProvider
 	mu               sync.RWMutex
@@ -92,9 +92,16 @@ func (s *DeviceAPIServer) PrepareRun(ctx context.Context) (preparedDeviceAPIServ
 	if s.HealthAddress != "" {
 		s.HealthServer = health.NewServer()
 		healthpb.RegisterHealthServer(s.AdminServer, s.HealthServer)
+		// Also register on DeviceServer so sidecar providers connecting via
+		// unix socket can perform health checks without a separate connection.
+		healthpb.RegisterHealthServer(s.DeviceServer, s.HealthServer)
 		s.HealthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
 	}
 
+	// Enable gRPC reflection on both servers. This is intentional:
+	// - DeviceServer: allows grpcurl/grpc_cli debugging
+	// - AdminServer: required for channelz and admin tooling
+	// To restrict in production, use NetworkPolicy on the admin port.
 	reflection.Register(s.DeviceServer)
 	reflection.Register(s.AdminServer)
 
@@ -139,13 +146,27 @@ func (s *DeviceAPIServer) run(ctx context.Context) error {
 		go func() {
 			defer s.wg.Done()
 
+			defer func() {
+				if r := recover(); r != nil {
+					klog.ErrorS(nil, "Health monitor panicked, setting NOT_SERVING", "panic", r)
+
+					if s.HealthServer != nil {
+						s.HealthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+					}
+				}
+			}()
+
 			s.monitorServiceHealth(ctx)
 		}()
 	}
 
 	if s.MetricsAddress != "" {
-		// TODO: put in wg??
-		go s.serveMetrics(ctx)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+
+			s.serveMetrics(ctx)
+		}()
 	}
 
 	if err := s.waitForStorage(ctx); err != nil {
@@ -174,7 +195,18 @@ func (s *DeviceAPIServer) run(ctx context.Context) error {
 		s.DeviceServer.GracefulStop()
 
 		if s.AdminServer != nil {
-			s.AdminServer.GracefulStop()
+			adminDone := make(chan struct{})
+			go func() {
+				s.AdminServer.GracefulStop()
+				close(adminDone)
+			}()
+
+			select {
+			case <-adminDone:
+			case <-time.After(s.ShutdownGracePeriod):
+				logger.V(2).Info("AdminServer graceful stop timed out, forcing stop")
+				s.AdminServer.Stop()
+			}
 		}
 
 		if s.AdminCleanup != nil {
@@ -214,14 +246,17 @@ func (s *DeviceAPIServer) serveHealth(ctx context.Context) {
 	// to unblock Serve and reject new conns.
 	go func() {
 		<-ctx.Done()
-		lis.Close()
+
+		if err := lis.Close(); err != nil {
+			logger.Error(err, "Failed to close health listener", "address", s.HealthAddress)
+		}
 	}()
 
 	logger.V(2).Info("Starting health server", "address", s.HealthAddress)
 
 	serveErr := s.AdminServer.Serve(lis)
 	if serveErr != nil && !errors.Is(serveErr, grpc.ErrServerStopped) && !errors.Is(serveErr, net.ErrClosed) {
-		logger.Error(err, "Health server stopped unexpectedly")
+		logger.Error(serveErr, "Health server stopped unexpectedly")
 	}
 }
 
@@ -268,7 +303,7 @@ func (s *DeviceAPIServer) serveMetrics(ctx context.Context) {
 
 	serveErr := metricsSrv.Serve(lis)
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && !errors.Is(serveErr, net.ErrClosed) {
-		logger.Error(err, "Metrics server stopped unexpectedly", "address", s.MetricsAddress)
+		logger.Error(serveErr, "Metrics server stopped unexpectedly", "address", s.MetricsAddress)
 	}
 }
 
@@ -277,48 +312,40 @@ func (s *DeviceAPIServer) waitForStorage(ctx context.Context) error {
 		return fmt.Errorf("storage backend is not initialized")
 	}
 
-	logger := klog.FromContext(ctx)
-	startTime := time.Now()
-
 	if s.Storage.IsReady() {
 		return nil
 	}
 
-	pollTicker := time.NewTicker(200 * time.Millisecond)
-	defer pollTicker.Stop()
-
-	heartbeat := time.NewTicker(5 * time.Second)
-	defer heartbeat.Stop()
-
+	logger := klog.FromContext(ctx)
 	logger.Info("Waiting for storage backend to become ready")
+	startTime := time.Now()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-
-		case <-pollTicker.C:
+	err := wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 60*time.Second, true,
+		func(ctx context.Context) (bool, error) {
 			if s.Storage.IsReady() {
 				logger.V(2).Info("Storage backend is ready",
 					"duration", time.Since(startTime).Round(time.Second))
-				return nil
+				return true, nil
 			}
 
-		case <-heartbeat.C:
-			logger.V(2).Info("Still waiting for storage backend",
-				"elapsed", time.Since(startTime).Round(time.Second))
-		}
+			return false, nil
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("timed out waiting for storage backend readiness: %w", err)
 	}
+
+	return nil
 }
 
 func (s *DeviceAPIServer) installAPIServices(ctx context.Context) error {
 	logger := klog.FromContext(ctx)
 
 	var services []api.Service
-	for _, sp := range s.ServiceProviders {
+	for i, sp := range s.ServiceProviders {
 		service, err := sp.Install(s.DeviceServer, s.Storage.StorageConfig)
 		if err != nil {
-			return fmt.Errorf("failed to install API service: %w", err)
+			return fmt.Errorf("failed to install API service (index %d): %w", i, err)
 		}
 
 		services = append(services, service)

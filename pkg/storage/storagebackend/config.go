@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -28,6 +28,10 @@ type Config struct {
 	KineSocketPath string
 	DatabaseDir    string
 
+	// InMemory skips Kine/SQLite entirely. Services supply their own
+	// in-memory storage.Interface, so the backend only needs to report ready.
+	InMemory bool
+
 	StorageConfig apistorage.Config
 }
 
@@ -40,6 +44,7 @@ func NewConfig(ctx context.Context, opts options.CompletedOptions) (*Config, err
 		KineConfig:     opts.KineConfig,
 		KineSocketPath: opts.KineSocketPath,
 		DatabaseDir:    opts.DatabaseDir,
+		InMemory:       opts.InMemory,
 	}
 
 	if err := opts.ApplyTo(&config.StorageConfig); err != nil {

@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ type GPUsGetter interface {
 type GPUInterface interface {
 	Create(ctx context.Context, gPU *devicev1alpha1.GPU, opts v1.CreateOptions) (*devicev1alpha1.GPU, error)
 	Update(ctx context.Context, gPU *devicev1alpha1.GPU, opts v1.UpdateOptions) (*devicev1alpha1.GPU, error)
+	UpdateStatus(ctx context.Context, gPU *devicev1alpha1.GPU, opts v1.UpdateOptions) (*devicev1alpha1.GPU, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	Get(ctx context.Context, name string, opts v1.GetOptions) (*devicev1alpha1.GPU, error)
 	List(ctx context.Context, opts v1.ListOptions) (*devicev1alpha1.GPUList, error)
@@ -183,6 +184,26 @@ func (c *gpus) Update(ctx context.Context, gpu *devicev1alpha1.GPU, opts v1.Upda
 
 	obj := devicev1alpha1.FromProto(resp)
 	c.logger.V(2).Info("Updated GPU",
+		"name", obj.GetName(),
+		"namespace", c.getNamespace(),
+		"resource-version", obj.GetResourceVersion(),
+	)
+
+	return obj, nil
+}
+
+// UpdateStatus updates only the status subresource of a GPU.
+func (c *gpus) UpdateStatus(ctx context.Context, gpu *devicev1alpha1.GPU, opts v1.UpdateOptions) (*devicev1alpha1.GPU, error) {
+	resp, err := c.client.UpdateGpuStatus(ctx, &pb.UpdateGpuStatusRequest{
+		Gpu:  devicev1alpha1.ToProto(gpu),
+		Opts: &pb.UpdateOptions{},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	obj := devicev1alpha1.FromProto(resp)
+	c.logger.V(2).Info("Updated GPU status",
 		"name", obj.GetName(),
 		"namespace", c.getNamespace(),
 		"resource-version", obj.GetResourceVersion(),

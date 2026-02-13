@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package client
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -53,5 +54,19 @@ func TestClientConnFor(t *testing.T) {
 			t.Fatalf("failed to create client: %v", err)
 		}
 		conn.Close()
+	})
+
+	t.Run("Rejects non-unix target with insecure credentials", func(t *testing.T) {
+		cfg := &Config{
+			Target:    "dns:///localhost:8080",
+			UserAgent: "test/1.0",
+		}
+		_, err := ClientConnFor(cfg)
+		if err == nil {
+			t.Fatal("expected error for non-unix target with insecure credentials")
+		}
+		if !strings.Contains(err.Error(), "insecure credentials require unix://") {
+			t.Errorf("unexpected error message: %v", err)
+		}
 	})
 }

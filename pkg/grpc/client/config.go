@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ package client
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/nvidia/nvsentinel/pkg/util/version"
+	"github.com/nvidia/nvsentinel/pkg/version"
 )
 
 const (
@@ -71,6 +72,12 @@ func (c *Config) Default() {
 func (c *Config) Validate() error {
 	if c.Target == "" {
 		return fmt.Errorf("gRPC target address is required; verify %s is not empty", NvidiaDeviceAPITargetEnvVar)
+	}
+
+	// Validate target scheme
+	if !strings.HasPrefix(c.Target, "unix://") && !strings.HasPrefix(c.Target, "unix:") &&
+		!strings.HasPrefix(c.Target, "dns:") && !strings.HasPrefix(c.Target, "passthrough:") {
+		return fmt.Errorf("gRPC target %q must use unix://, dns:, or passthrough: scheme", c.Target)
 	}
 
 	if c.UserAgent == "" {

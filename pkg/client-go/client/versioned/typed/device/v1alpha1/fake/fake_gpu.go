@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -106,6 +106,15 @@ func (c *fakeGPUs) Update(ctx context.Context, gPU *devicev1alpha1.GPU, opts v1.
 		Invokes(testing.NewRootUpdateActionWithOptions(c.Resource(), gPU, opts), emptyResult)
 	if obj == nil {
 		return emptyResult, err
+	}
+	return obj.(*devicev1alpha1.GPU), err
+}
+
+func (c *fakeGPUs) UpdateStatus(ctx context.Context, gPU *devicev1alpha1.GPU, opts v1.UpdateOptions) (*devicev1alpha1.GPU, error) {
+	obj, err := c.Fake.
+		Invokes(testing.NewRootUpdateSubresourceActionWithOptions(c.Resource(), "status", gPU, opts), &devicev1alpha1.GPU{})
+	if obj == nil {
+		return nil, err
 	}
 	return obj.(*devicev1alpha1.GPU), err
 }

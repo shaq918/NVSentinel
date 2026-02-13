@@ -1,0 +1,255 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for device-api-server.
+# This is a YAML-formatted file.
+
+# -- Number of replicas (ignored for DaemonSet, kept for consistency)
+replicaCount: 1
+
+# -- Image configuration
+image:
+  # -- Image repository
+  repository: ghcr.io/nvidia/device-api-server
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag (defaults to Chart appVersion)
+  tag: ""
+
+# -- Image pull secrets
+imagePullSecrets: []
+
+# -- Override the name of the chart
+nameOverride: ""
+
+# -- Override the full name of the chart
+fullnameOverride: ""
+
+# -- Server configuration
+server:
+  # -- Unix socket path for gRPC API (device service)
+  # Must be an absolute path under /var/run/ or /tmp/.
+  # WARNING: Arbitrary paths may expose host filesystem risks.
+  unixSocket: /var/run/device-api/device.sock
+  # -- HTTP port for health/admin gRPC endpoints
+  healthPort: 8081
+  # -- HTTP port for Prometheus metrics
+  metricsPort: 9090
+  # -- Graceful shutdown grace period in seconds
+  shutdownGracePeriod: 25
+  # -- Shutdown delay in seconds (preStop sleep for k8s endpoint propagation)
+  shutdownDelay: 5
+
+# -- Logging configuration
+logging:
+  # -- Log verbosity level (0=info, higher=more verbose)
+  verbosity: 0
+
+# -- NVML Provider Sidecar configuration
+# Deploys the NVML provider as a sidecar container that connects to device-api-server
+# via gRPC. This provides better isolation and independent updates compared to the
+# built-in nvml provider.
+nvmlProvider:
+  # -- Enable the NVML provider sidecar container
+  enabled: false
+  # -- Image configuration for the nvml-provider sidecar
+  image:
+    # -- Image repository
+    repository: ghcr.io/nvidia/device-api-server
+    # -- Image tag (defaults to Chart appVersion)
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+  # -- gRPC address of the device-api-server (derived from server.unixSocket in daemonset template)
+  # Sidecar connects via shared unix socket volume.
+  # This value is ignored when the sidecar is enabled; the template uses server.unixSocket directly.
+  # -- Unique identifier for this provider instance
+  providerID: "nvml-provider-sidecar"
+  # -- Root path where NVIDIA driver libraries are located
+  driverRoot: /run/nvidia/driver
+  # -- Enable XID event monitoring for health checks
+  healthCheckEnabled: true
+  # -- HTTP port for health check endpoints
+  healthPort: 8082
+  # -- Resource limits and requests for the sidecar
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  # -- Security context for the sidecar container
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+# -- RuntimeClassName for the pod
+# Set to "nvidia" when nvml.enabled is true to inject NVIDIA driver libraries
+# Requires the NVIDIA GPU Operator or manual RuntimeClass configuration
+runtimeClassName: ""
+
+# -- ServiceAccount configuration
+serviceAccount:
+  # -- Create a ServiceAccount
+  create: true
+  # -- ServiceAccount name (generated if not set)
+  name: ""
+  # -- Annotations to add to the ServiceAccount
+  annotations: {}
+  # -- Automount service account token
+  automountServiceAccountToken: false
+
+# -- RBAC configuration
+rbac:
+  # -- Create RBAC resources
+  create: true
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod labels
+podLabels: {}
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Resource limits and requests
+# Default limits handle the common 8-GPU case. For larger nodes, increase:
+# - 8 GPUs:  500m CPU, 512Mi memory (default)
+# - 16 GPUs: 1000m CPU, 1Gi memory
+# Memory usage scales with: GPU count * watch event size * watcher count
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -- Node selector for scheduling
+# @default -- Schedules only on GPU nodes
+nodeSelector:
+  nvidia.com/gpu.present: "true"
+
+# -- Tolerations for scheduling
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+# -- Affinity rules
+affinity: {}
+
+# -- Priority class name
+priorityClassName: ""
+
+# -- Liveness probe configuration (gRPC health check on admin server)
+livenessProbe:
+  grpc:
+    port: 8081
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# -- Readiness probe configuration (gRPC health check on admin server)
+readinessProbe:
+  grpc:
+    port: 8081
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# -- Update strategy for the DaemonSet
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# -- Service configuration (for metrics scraping)
+service:
+  # -- Service type
+  type: ClusterIP
+  # -- Service annotations
+  annotations: {}
+
+# -- Prometheus metrics configuration
+metrics:
+  # -- Enable metrics endpoint
+  enabled: true
+  # -- ServiceMonitor configuration (requires Prometheus Operator)
+  serviceMonitor:
+    # -- Create ServiceMonitor resource
+    enabled: false
+    # -- ServiceMonitor namespace (defaults to release namespace)
+    namespace: ""
+    # -- Additional labels for ServiceMonitor
+    labels: {}
+    # -- Scrape interval
+    interval: 30s
+    # -- Scrape timeout
+    scrapeTimeout: 10s
+    # -- Metric relabeling configs
+    metricRelabelings: []
+    # -- Relabeling configs
+    relabelings: []
+  # -- PrometheusRule configuration (requires Prometheus Operator)
+  prometheusRule:
+    # -- Create PrometheusRule resource
+    enabled: false
+    # -- PrometheusRule namespace (defaults to release namespace)
+    namespace: ""
+    # -- Additional labels for PrometheusRule
+    labels: {}
+    # -- Additional alerting rules
+    additionalRules: []
+
+# -- Additional environment variables
+env: []
+# - name: LOG_FORMAT
+#   value: json
+
+# -- Additional volume mounts
+extraVolumeMounts: []
+
+# -- Additional volumes
+extraVolumes: []
+
+# -- Init containers
+initContainers: []
+
+# -- Sidecar containers
+sidecars: []
