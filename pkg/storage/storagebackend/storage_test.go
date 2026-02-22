@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -110,6 +110,43 @@ func TestStorage_SocketInUse(t *testing.T) {
 	expectedMsg := "is already in use"
 	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Errorf("Expected error containing %q, got: %v", expectedMsg, err)
+	}
+}
+
+func TestStorage_InMemoryMode(t *testing.T) {
+	s := &Storage{InMemory: true}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ps, err := s.PrepareRun(ctx)
+	if err != nil {
+		t.Fatalf("PrepareRun failed: %v", err)
+	}
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- ps.Run(ctx)
+	}()
+
+	// In-memory should become ready almost immediately.
+	waitErr := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		return s.IsReady(), nil
+	})
+	if waitErr != nil {
+		t.Fatal("In-memory storage did not become ready")
+	}
+
+	cancel()
+
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Error("In-memory storage did not shut down gracefully")
+	}
+
+	if s.IsReady() {
+		t.Error("In-memory storage should not be ready after shutdown")
 	}
 }
 

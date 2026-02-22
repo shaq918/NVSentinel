@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,8 @@ func NewLatencyUnaryInterceptor(logger logr.Logger) grpc.UnaryClientInterceptor 
 				return err
 			}
 
-			logger.Error(err, "RPC failed", kv...)
+			logger.V(4).Info("RPC error details", "error", err)
+			logger.Error(nil, "RPC failed", kv...)
 
 			return err
 		}
@@ -81,7 +82,8 @@ func NewLatencyStreamInterceptor(logger logr.Logger) grpc.StreamClientIntercepto
 				return stream, err
 			}
 
-			logger.Error(err, "Stream establishment failed", kv...)
+			logger.V(4).Info("Stream error details", "error", err)
+			logger.Error(nil, "Stream establishment failed", kv...)
 
 			return stream, err
 		}

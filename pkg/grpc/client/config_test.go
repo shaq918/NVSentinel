@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,12 +86,52 @@ func TestConfig_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "Valid config",
+			name: "Valid unix:/// config",
 			cfg: Config{
 				Target:    "unix:///var/run/test.sock",
 				UserAgent: "test/1.0",
 			},
 			wantErr: false,
+		},
+		{
+			name: "Valid unix: config",
+			cfg: Config{
+				Target:    "unix:/var/run/test.sock",
+				UserAgent: "test/1.0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid dns: config",
+			cfg: Config{
+				Target:    "dns:///localhost:8080",
+				UserAgent: "test/1.0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid passthrough: config",
+			cfg: Config{
+				Target:    "passthrough:///localhost:8080",
+				UserAgent: "test/1.0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Rejects http scheme",
+			cfg: Config{
+				Target:    "http://evil.com",
+				UserAgent: "test/1.0",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Rejects bare hostname",
+			cfg: Config{
+				Target:    "somehost:1234",
+				UserAgent: "test/1.0",
+			},
+			wantErr: true,
 		},
 		{
 			name: "Missing target",

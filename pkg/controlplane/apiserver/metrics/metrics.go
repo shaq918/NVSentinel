@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"sync"
 
 	grpcprom "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
-	"github.com/nvidia/nvsentinel/pkg/util/version"
+	"github.com/nvidia/nvsentinel/pkg/version"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
@@ -31,14 +31,18 @@ type ServerMetrics struct {
 	Registry            *prometheus.Registry
 	Collectors          *grpcprom.ServerMetrics
 	ServiceHealthStatus *prometheus.GaugeVec
+	mu                  sync.Mutex
 	buildInfoLabels     prometheus.Labels
 	registerOnce        sync.Once
 }
 
 // WithBuildInfo populates the metadata labels used by the build_info metric.
+// Must be called before Register() and only from a single goroutine (typically during init).
 func (m *ServerMetrics) WithBuildInfo(info version.Info) *ServerMetrics {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.buildInfoLabels = prometheus.Labels{
-		"version":    info.GitVersion,
+		"version":    info.Version,
 		"revision":   info.GitCommit,
 		"build_date": info.BuildDate,
 		"goversion":  info.GoVersion,
@@ -79,11 +83,15 @@ func (m *ServerMetrics) Register() {
 			klog.ErrorS(err, "Failed to register service health metrics")
 		}
 
-		if m.buildInfoLabels != nil {
+		m.mu.Lock()
+		labels := m.buildInfoLabels
+		m.mu.Unlock()
+
+		if labels != nil {
 			version := prometheus.NewGauge(prometheus.GaugeOpts{
 				Name:        "device_apiserver_build_info",
 				Help:        "Build information about the device-apiserver binary.",
-				ConstLabels: m.buildInfoLabels,
+				ConstLabels: labels,
 			})
 			version.Set(1)
 

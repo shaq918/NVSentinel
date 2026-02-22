@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -125,8 +125,6 @@ func (o *Options) Complete() (CompletedOptions, error) {
 		o.MinPingInterval = 5 * time.Second
 	}
 
-	o.PermitWithoutStream = true
-
 	completed := completedOptions{
 		Options: *o,
 	}
@@ -195,12 +193,6 @@ func (o *Options) Validate() []error {
 		allErrors = append(allErrors,
 			fmt.Errorf("min-ping-interval: %v must be at least 5s",
 				o.MinPingInterval))
-	}
-
-	if !o.PermitWithoutStream {
-		allErrors = append(allErrors,
-			fmt.Errorf("permit-without-stream: %v must be true to allow keepalive pings without active streams",
-				o.PermitWithoutStream))
 	}
 
 	return allErrors

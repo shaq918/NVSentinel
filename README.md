@@ -1,56 +1,169 @@
 # NVIDIA Device API
 
-**The NVIDIA Device API allows you to query and manipulate the state of node-local resources (such as GPUs) in Kubernetes**. Unlike the cluster-wide Kubernetes API, the Device API operates exclusively at the node level.
+The NVIDIA Device API provides a Kubernetes-idiomatic Go SDK and Protobuf definitions for interacting with NVIDIA device resources.
 
-The core control plane is the Device API server and the gRPC API that it exposes. Node-level agents, local monitoring tools, and external components communicate with one another through this node-local Device API server rather than the central Kubernetes control plane.
+**Node-local GPU device state management for Kubernetes**
 
-NVIDIA provides a [client library](./pkg/client-go) for those looking to write applications using the Device API. This library allows you to query and manipulate node-local resources using standard Kubernetes interfaces. Alternatively, the API can be accessed directly via gRPC.
+The NVIDIA Device API provides a standardized gRPC interface for observing and managing GPU device states in Kubernetes environments. It enables coordination between:
+
+- **Providers** (health monitors like NVSentinel, DCGM) that detect GPU health issues
+- **Consumers** (device plugins, DRA drivers) that need GPU health status for scheduling
+
+## Overview
+
+The Device API Server is a pure Go gRPC server with no hardware dependencies.
+GPU enumeration and health monitoring is provided by external providers (sidecars).
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        GPU Node                              │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              Device API Server (DaemonSet)              ││
+│  │                                                         ││
+│  │  ┌─────────────────────────────────────────────────┐   ││
+│  │  │               GpuService (unified)              │   ││
+│  │  │  Read:  GetGpu, ListGpus, WatchGpus             │   ││
+│  │  │  Write: CreateGpu, UpdateGpuStatus, DeleteGpu   │   ││
+│  │  └────────────────────┬────────────────────────────┘   ││
+│  │                       ▼                                 ││
+│  │  ┌──────────────────────────────────────────────────┐  ││
+│  │  │                 GPU Cache (RWMutex)               │  ││
+│  │  └──────────────────────────────────────────────────┘  ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                              │
+│  Providers (gRPC clients):                                   │
+│  ├── nvml-provider sidecar ─► CreateGpu, UpdateGpuStatus    │
+│  ├── NVSentinel ────────────► CreateGpu, UpdateGpuStatus    │
+│  └── Custom providers ──────► CreateGpu, UpdateGpuStatus    │
+│                                                              │
+│  Consumers (gRPC clients):                                   │
+│  ├── Device Plugins ────────► GetGpu, ListGpus, WatchGpus   │
+│  └── DRA Drivers ───────────► GetGpu, ListGpus, WatchGpus   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Key Features
+
+- **Pure Go server**: No hardware dependencies; providers run as separate sidecars
+- **Read-blocking semantics**: Consumer reads block during provider updates to prevent stale data
+- **Multiple provider support**: Aggregate health status from NVSentinel, DCGM, or custom providers
+- **Watch streams**: Real-time GPU state change notifications
+- **Prometheus metrics**: Full observability with alerting rules
+- **Helm chart**: Production-ready Kubernetes deployment
+
+## Repository Structure
+
+| Module | Description |
+| :--- | :--- |
+| [`api/`](./api) | Protobuf definitions and Go types for the Device API. |
+| [`client-go/`](./client-go) | Kubernetes-style generated clients, informers, and listers. |
+| [`code-generator/`](./code-generator) | Tools for generating NVIDIA-specific client logic. |
+| [`cmd/device-api-server/`](./cmd/device-api-server) | Device API Server binary |
+| [`pkg/deviceapiserver/`](./pkg/deviceapiserver) | Server implementation |
+| [`charts/`](./charts) | Helm chart for Kubernetes deployment |
 
 ---
 
 ## Quick Start
 
+### Deploy Device API Server
+
+```bash
+# Install with Helm
+helm install device-api-server ./deployments/helm/device-api-server \
+  --namespace device-api --create-namespace
+```
+
+For GPU enumeration and health monitoring, deploy the nvml-provider sidecar.
+See the [nvml-sidecar demo](demos/nvml-sidecar-demo.sh) for an example deployment.
+
+### Using the Go Client
+
+```bash
+go get github.com/nvidia/device-api/api@latest
+```
+
 ```go
 import (
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "github.com/nvidia/nvsentinel/pkg/client-go/clientset/versioned"
-	"github.com/nvidia/nvsentinel/pkg/grpc/client"
+    v1alpha1 "github.com/nvidia/device-api/api/gen/go/device/v1alpha1"
+)
+```
+
+### Example: List GPUs
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    v1alpha1 "github.com/nvidia/device-api/api/gen/go/device/v1alpha1"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
-    ctx := context.Background()
-
-    // Connect to the local node's Device API server
-    config := &client.Config{Target: "unix:///var/run/nvidia-device-api/device-api.sock"}
-    clientset := versioned.NewForConfigOrDie(config)
-
-    // Standard Kubernetes-style List call
-    gpus, err := clientset.DeviceV1alpha1().GPUs().List(ctx, metav1.ListOptions{})
+    // Connect via Unix socket (recommended for node-local access)
+    conn, err := grpc.NewClient(
+        "unix:///var/run/device-api/device.sock",
+        grpc.WithTransportCredentials(insecure.NewCredentials()),
+    )
     if err != nil {
-        panic(err)
+        log.Fatalf("failed to connect: %v", err)
+    }
+    defer conn.Close()
+
+    client := v1alpha1.NewGpuServiceClient(conn)
+
+    // List all GPUs
+    resp, err := client.ListGpus(context.Background(), &v1alpha1.ListGpusRequest{})
+    if err != nil {
+        log.Fatalf("failed to list GPUs: %v", err)
+    }
+
+    for _, gpu := range resp.GpuList.Items {
+        log.Printf("GPU: %s (UUID: %s)", gpu.Name, gpu.Spec.Uuid)
+        for _, cond := range gpu.Status.Conditions {
+            log.Printf("  %s: %s (%s)", cond.Type, cond.Status, cond.Reason)
+        }
     }
 }
 ```
 
-See [examples](./examples) for additional details.
+### Using grpcurl
 
----
-
-## Components
-
-### Device API Server
-The `device-apiserver` is a node-local control plane for NVIDIA devices.
-
-**Running the server**:
 ```bash
-# Build the binary
-make build
+# List GPUs
+grpcurl -plaintext localhost:50051 nvidia.device.v1alpha1.GpuService/ListGpus
 
-# Start the server with a local database
-./bin/device-apiserver \
-    --bind-address="unix:///var/run/nvidia-device-api/device-api.sock" \
-    --datastore-endpoint="sqlite:///var/lib/nvidia-device-api/state.db"
+# Watch for changes
+grpcurl -plaintext localhost:50051 nvidia.device.v1alpha1.GpuService/WatchGpus
 ```
+
+## API Overview
+
+### GpuService
+
+The unified `GpuService` follows Kubernetes API conventions with standard CRUD methods:
+
+**Read Operations** (for consumers like device plugins and DRA drivers):
+
+| Method | Description |
+|--------|-------------|
+| `GetGpu` | Retrieves a single GPU resource by its unique name |
+| `ListGpus` | Retrieves a list of all GPU resources |
+| `WatchGpus` | Streams lifecycle events (ADDED, MODIFIED, DELETED) for GPU resources |
+
+**Write Operations** (for providers like health monitors):
+
+| Method | Description |
+|--------|-------------|
+| `CreateGpu` | Register a new GPU with the server |
+| `UpdateGpu` | Replace entire GPU resource |
+| `UpdateGpuStatus` | Update GPU status only (acquires write lock) |
+| `DeleteGpu` | Remove a GPU from the server |
 
 ---
 
@@ -58,26 +171,57 @@ make build
 
 ### Prerequisites
 
-* **Go**: `v1.25+`
-* **Protoc**: Required for protobuf generation.
-* **Make**
+- **Go**: `v1.25+`
+- **Protoc**: Required for protobuf generation
+- **golangci-lint**: Required for code quality checks
+- **Make**: Used for orchestrating build and generation tasks
+- **Helm 3.0+**: For chart development
 
-### Workflow
-The project utilizes a unified generation pipeline. **Avoid editing generated files directly**. If Protobuf definitions (`.proto`) or Go types (`_types.go`) are modified, run the following commands to synchronize the repository:
+### Build
 
 ```bash
-# Sync all gRPC bindings, DeepCopy/Conversion methods, Clients, and Server
-make code-gen
+# Build everything
+make build
 
-# Run tests
+# Build server only
+make build-server
+
+# Generate protobuf code
+make code-gen
+```
+
+### Test
+
+```bash
+# Run all tests
 make test
 
-# Verify code quality
-make lint
-
-# Optional: Run integration tests
-make test-integration
+# Run server tests only
+make test-server
 ```
+
+### Lint
+
+```bash
+make lint
+```
+
+---
+
+## Documentation
+
+- **[API Reference](docs/api/device-api-server.md)** - Complete gRPC API documentation
+- **[Operations Guide](docs/operations/device-api-server.md)** - Deployment, configuration, monitoring
+- **[Helm Chart](deployments/helm/device-api-server/README.md)** - Chart configuration reference
+- **[Design Documents](docs/design/)** - Architecture and design decisions
+
+The `client-go` module includes several examples for how to use the generated clients:
+
+* **Standard Client**: Basic CRUD operations.
+* **Shared Informers**: High-performance caching for controllers.
+* **Watch**: Real-time event streaming via gRPC.
+
+See the [examples](./client-go/examples) directory for details.
 
 ---
 

@@ -1,4 +1,4 @@
-//  Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//  Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ func TestNewConfig(t *testing.T) {
 	ctx := context.Background()
 
 	opts := options.NewOptions()
+	opts.InMemory = false
 	opts.DatabasePath = "/tmp/nvsentinel/test.db"
 
 	completedOpts, err := opts.Complete()

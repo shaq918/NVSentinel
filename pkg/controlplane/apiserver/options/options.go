@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package options
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -116,6 +117,8 @@ func (o *Options) Complete(ctx context.Context) (CompletedOptions, error) {
 	o.NodeName = strings.ToLower(strings.TrimSpace(o.NodeName)) //nolint:wsl
 
 	if o.HealthAddress == "" {
+		// Default binds to all interfaces for Kubernetes kubelet health probes.
+		// Use NetworkPolicy to restrict access in production.
 		o.HealthAddress = ":50051"
 	}
 
@@ -124,6 +127,8 @@ func (o *Options) Complete(ctx context.Context) (CompletedOptions, error) {
 	}
 
 	if o.MetricsAddress == "" {
+		// Default binds to all interfaces for Prometheus scraping.
+		// Use NetworkPolicy to restrict access in production.
 		o.MetricsAddress = ":9090"
 	}
 
@@ -203,10 +208,15 @@ func (o *CompletedOptions) Validate() []error {
 		}
 	}
 
-	if o.HealthAddress != "" && o.HealthAddress == o.MetricsAddress {
-		allErrors = append(allErrors,
-			fmt.Errorf("health-probe-bind-address and metrics-bind-address: must not be the same (%s)",
-				o.HealthAddress))
+	if o.HealthAddress != "" && o.MetricsAddress != "" {
+		_, healthPort, _ := net.SplitHostPort(o.HealthAddress)
+		_, metricsPort, _ := net.SplitHostPort(o.MetricsAddress)
+
+		if healthPort != "" && healthPort == metricsPort {
+			allErrors = append(allErrors,
+				fmt.Errorf("health-probe-bind-address and metrics-bind-address: must not use the same port (%s)",
+					healthPort))
+		}
 	}
 
 	if o.ShutdownGracePeriod < 0 {

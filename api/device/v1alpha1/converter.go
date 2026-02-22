@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,17 @@ type Converter interface {
 	ToProtobufList(source *GPUList) *pb.GpuList
 
 	// FromProtobufObjectMeta converts a protobuf ObjectMeta into a metav1.ObjectMeta object.
+	//
+	// The following fields are intentionally excluded from the proto API:
+	// - DeletionTimestamp/GracePeriodSeconds: Managed by server-side deletion logic
+	// - Labels/Annotations: Not needed for device-level proto API; K8s controllers
+	//   should use the native K8s API for label/annotation management
+	// - OwnerReferences/Finalizers: Not exposed in proto to prevent external
+	//   controllers from creating dependency chains via the device API
+	// - ManagedFields/SelfLink: Server-managed metadata, not user-facing
+	//
+	// If labels/annotations support is needed in the future, add them to the
+	// proto ObjectMeta definition and remove the goverter:ignore directives.
 	//
 	// goverter:map Uid UID
 	// goverter:ignore GenerateName DeletionTimestamp DeletionGracePeriodSeconds

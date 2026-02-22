@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -194,6 +194,9 @@ service GpuService {
   // UpdateGpu updates a single GPU resource.
   rpc UpdateGpu(UpdateGpuRequest) returns (Gpu);
 
+  // UpdateGpuStatus updates only the status subresource of a GPU.
+  rpc UpdateGpuStatus(UpdateGpuStatusRequest) returns (Gpu);
+
   // DeleteGpu deletes a single GPU resource.
   rpc DeleteGpu(DeleteGpuRequest) returns (google.protobuf.Empty);
 }
@@ -283,6 +286,18 @@ message CreateGpuRequest {
 // UpdateGpuRequest specifies the GPU to update.
 message UpdateGpuRequest {
   // gpu is the GPU resource to update.
+  Gpu gpu = 1;
+
+  // opts contains the options for the update.
+  UpdateOptions opts = 2;
+}
+
+// UpdateGpuStatusRequest specifies the GPU whose status should be updated.
+// Only metadata (name, namespace, resource_version) and status fields are used.
+message UpdateGpuStatusRequest {
+  // gpu is the GPU resource with updated status.
+  // The server reads metadata.name, metadata.namespace, metadata.resource_version
+  // and status from this object. All other fields are ignored.
   Gpu gpu = 1;
 
   // opts contains the options for the update.

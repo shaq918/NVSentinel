@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package client
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -37,6 +38,15 @@ func ClientConnFor(config *Config, opts ...DialOption) (*grpc.ClientConn, error)
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+
+	// Insecure credentials are only safe over Unix domain sockets.
+	// TLS is required for non-UDS targets (dns:, passthrough:).
+	if !strings.HasPrefix(cfg.Target, "unix://") && !strings.HasPrefix(cfg.Target, "unix:") {
+		return nil, fmt.Errorf(
+			"insecure credentials require unix:// target, got %q; TLS is required for non-UDS targets",
+			cfg.Target,
+		)
 	}
 
 	logger := cfg.GetLogger()

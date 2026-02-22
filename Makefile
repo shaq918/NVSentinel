@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,14 +21,28 @@
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
-VERSION_PKG = github.com/nvidia/nvsentinel/pkg/util/version
-GIT_VERSION := $(shell git describe --tags --always --dirty)
-GIT_COMMIT  := $(shell git rev-parse HEAD)
-BUILD_DATE  := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+# Go build settings
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_TREE_STATE ?= $(shell if git diff --quiet 2>/dev/null; then echo "clean"; else echo "dirty"; fi)
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-LDFLAGS := -X $(VERSION_PKG).GitVersion=$(GIT_VERSION) \
-           -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) \
-           -X $(VERSION_PKG).BuildDate=$(BUILD_DATE)
+# Version package path for ldflags
+VERSION_PKG = github.com/nvidia/nvsentinel/pkg/version
+
+# Container settings
+CONTAINER_RUNTIME ?= docker
+IMAGE_REGISTRY ?= ghcr.io/nvidia/nvsentinel
+DOCKERFILE := deployments/container/Dockerfile
+
+# Linker flags
+LDFLAGS = -s -w \
+	-X $(VERSION_PKG).Version=$(VERSION) \
+	-X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) \
+	-X $(VERSION_PKG).GitTreeState=$(GIT_TREE_STATE) \
+	-X $(VERSION_PKG).BuildDate=$(BUILD_DATE)
 
 # ==============================================================================
 # Targets
@@ -59,34 +73,134 @@ verify-codegen: code-gen ## Verify generated code is up-to-date.
 		exit 1; \
 	fi
 
-.PHONY: tidy
-tidy: ## Run go mod tidy
-	go mod tidy
-
-##@ Build & Test
+##@ Build
 
 .PHONY: build
-build: ## Build the device-apiserver binary.
-	go build -ldflags "$(LDFLAGS)" -o bin/device-apiserver ./cmd/device-apiserver
+build: build-modules build-server ## Build all modules and server.
+
+.PHONY: build-modules
+build-modules: ## Build all modules.
+	@for mod in $(MODULES); do \
+		if [ -f $$mod/Makefile ]; then \
+			$(MAKE) -C $$mod build; \
+		fi \
+	done
+
+.PHONY: build-server
+build-server: ## Build the Device API Server
+	@echo "Building device-api-server..."
+	@mkdir -p bin
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
+		-ldflags "$(LDFLAGS)" \
+		-o bin/device-api-server \
+		./cmd/device-api-server
+	@echo "Built bin/device-api-server"
+
+.PHONY: build-nvml-provider
+build-nvml-provider: ## Build the NVML Provider sidecar (requires CGO)
+	@echo "Building nvml-provider..."
+	@mkdir -p bin
+	CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
+		-tags=nvml \
+		-ldflags "$(LDFLAGS)" \
+		-o bin/nvml-provider \
+		./cmd/nvml-provider
+	@echo "Built bin/nvml-provider"
+
+##@ Testing
 
 .PHONY: test
-test: ## Run unit tests.
-	GOTOOLCHAIN=go1.25.5+auto go test -v $$(go list ./... | grep -vE '/pkg/client-go/(client|informers|listers)|/internal/generated/|/test/integration/|/examples/') -cover cover.out
+test: test-modules test-server ## Run tests in all modules.
+
+.PHONY: test-modules
+test-modules: ## Run tests in all modules.
+	@for mod in $(MODULES); do \
+		if [ -f $$mod/Makefile ]; then \
+			$(MAKE) -C $$mod test; \
+		fi \
+	done
+
+.PHONY: test-server
+test-server: ## Run server tests only
+	go test -race -v ./pkg/...
 
 .PHONY: test-integration
-test-integration: ## Run integration tests.
+test-integration: ## Run integration tests
 	go test -v ./test/integration/...
 
+##@ Linting
+
 .PHONY: lint
-lint: ## Run golangci-lint.
-	golangci-lint run ./...
+lint: ## Run linting on all modules.
+	@for mod in $(MODULES); do \
+		if [ -f $$mod/Makefile ]; then \
+			$(MAKE) -C $$mod lint; \
+		fi \
+	done
+	go vet ./...
+
+##@ Container Images
+
+.PHONY: docker-build
+docker-build: docker-build-server docker-build-nvml-provider ## Build all container images
+
+.PHONY: docker-build-server
+docker-build-server: ## Build device-api-server container image
+	$(CONTAINER_RUNTIME) build \
+		--target device-api-server \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg GIT_TREE_STATE=$(GIT_TREE_STATE) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		-t $(IMAGE_REGISTRY)/device-api-server:$(VERSION) \
+		-f $(DOCKERFILE) .
+
+.PHONY: docker-build-nvml-provider
+docker-build-nvml-provider: ## Build nvml-provider container image
+	$(CONTAINER_RUNTIME) build \
+		--target nvml-provider \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg GIT_TREE_STATE=$(GIT_TREE_STATE) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		-t $(IMAGE_REGISTRY)/nvml-provider:$(VERSION) \
+		-f $(DOCKERFILE) .
+
+.PHONY: docker-push
+docker-push: ## Push all container images
+	$(CONTAINER_RUNTIME) push $(IMAGE_REGISTRY)/device-api-server:$(VERSION)
+	$(CONTAINER_RUNTIME) push $(IMAGE_REGISTRY)/nvml-provider:$(VERSION)
+
+##@ Helm
+
+.PHONY: helm-lint
+helm-lint: ## Lint Helm chart
+	helm lint deployments/helm/device-api-server
+
+.PHONY: helm-template
+helm-template: ## Render Helm chart templates
+	helm template device-api-server deployments/helm/device-api-server
+
+.PHONY: helm-package
+helm-package: ## Package Helm chart
+	@mkdir -p dist/
+	helm package deployments/helm/device-api-server -d dist/
+
+##@ Cleanup
 
 .PHONY: clean
-clean: ## Remove generated artifacts.
-	@echo "Cleaning generated artifacts..."
+clean: ## Clean generated artifacts in all modules.
+	@for mod in $(MODULES); do \
+		if [ -f $$mod/Makefile ]; then \
+			$(MAKE) -C $$mod clean; \
+		fi \
+	done
 	rm -rf bin/
-	rm -rf internal/generated/
-	rm -rf pkg/client-go/client/ pkg/client-go/informers/ pkg/client-go/listers/
-	find api/ -name "zz_generated.deepcopy.go" -delete
-	find api/ -name "zz_generated.goverter.go" -delete
-	rm -f cover.out
+
+.PHONY: tidy
+tidy: ## Run go mod tidy on all modules.
+	@for mod in $(MODULES); do \
+		echo "Tidying $$mod..."; \
+		(cd $$mod && go mod tidy); \
+	done
+	go mod tidy

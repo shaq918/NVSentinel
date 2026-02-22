@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,9 +75,8 @@ func TestComplete(t *testing.T) {
 		if completed.MaxRecvMsgSize != 4194304 {
 			t.Errorf("expected default recv size 4MiB, got %d", completed.MaxRecvMsgSize)
 		}
-		if !completed.PermitWithoutStream {
-			t.Error("PermitWithoutStream should be forced to true")
-		}
+		// PermitWithoutStream defaults to true via NewOptions(), not forced by Complete().
+		// A zero-value Options{} will have PermitWithoutStream=false since there is no flag for it.
 	})
 
 	t.Run("Preserve user overrides", func(t *testing.T) {

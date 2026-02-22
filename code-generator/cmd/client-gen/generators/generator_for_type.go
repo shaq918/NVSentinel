@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 /*
-Portions Copyright (c) 2025 NVIDIA CORPORATION. All rights reserved.
+Portions Copyright (c) 2026 NVIDIA CORPORATION. All rights reserved.
 
 Modified from the original to support gRPC transport.
 Origin: https://github.com/kubernetes/code-generator/blob/v0.34.1/cmd/client-gen/generators/generator_for_type.go
@@ -401,9 +401,24 @@ func (c *$.type|allLowercasePlural$) Update(ctx $.context|raw$, $.type|allLowerc
 `
 
 var updateStatusTemplate = `
-// TODO: Implement UpdateStatus support.
+// UpdateStatus updates only the status subresource of a $.type|public$.
 func (c *$.type|allLowercasePlural$) UpdateStatus(ctx $.context|raw$, $.type|allLowercase$ *$.type|raw$, opts $.UpdateOptions|raw$) (*$.type|raw$, error) {
-	return nil, $.fmtErrorf|raw$("UpdateStatus not implemented")
+	resp, err := c.client.Update$.ProtoType$Status(ctx, &$.pb$.Update$.ProtoType$StatusRequest{
+		$.ProtoType$: $.ToProto|raw$($.type|allLowercase$),
+		Opts:         &$.pb$.UpdateOptions{},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	obj := $.FromProto|raw$(resp)
+	c.logger.V(2).Info("Updated $.type|public$ status",
+		"name", obj.GetName(),
+		"namespace", c.getNamespace(),
+		"resource-version", obj.GetResourceVersion(),
+	)
+
+	return obj, nil
 }
 `
 
