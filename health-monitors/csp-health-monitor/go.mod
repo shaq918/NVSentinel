@@ -5,7 +5,7 @@ go 1.25.0
 toolchain go1.25.3
 
 require (
-	cloud.google.com/go/compute v1.54.0
+	cloud.google.com/go/compute v1.55.0
 	cloud.google.com/go/logging v1.13.2
 	github.com/BurntSushi/toml v1.6.0
 	github.com/aws/aws-sdk-go-v2 v1.41.2
@@ -20,7 +20,7 @@ require (
 	golang.org/x/sync v0.19.0
 	google.golang.org/api v0.268.0
 	google.golang.org/genproto v0.0.0-20260128011058-8636f8732409
-	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409
+	google.golang.org/genproto/googleapis/api v0.0.0-20260203192932-546029d2fa20
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260203192932-546029d2fa20
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
