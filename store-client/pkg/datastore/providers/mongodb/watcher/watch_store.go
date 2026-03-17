@@ -63,6 +63,11 @@ type MongoDBConfig struct {
 	CertWatcher *certwatcher.CertWatcher
 	// AppName is used to identify the client in MongoDB connection tracking
 	AppName string
+	// UseSystemTLS instructs the client to use the system CA trust store instead of
+	// custom CA cert files. Use this when connecting to MongoDB Atlas or any deployment
+	// that uses publicly trusted certificates (e.g. Let's Encrypt, DigiCert).
+	// When true, no CA cert file is required and X.509 client auth is not attempted.
+	UseSystemTLS bool
 }
 
 // TokenConfig holds the token-specific configuration.
@@ -603,13 +608,23 @@ func constructMongoClientOptions(
 		tlsConfig *tls.Config
 		err       error
 	)
-	// Use CertWatcher if provided for automatic client certificate rotation
-	if mongoConfig.CertWatcher != nil {
+
+	switch {
+	case mongoConfig.UseSystemTLS:
+		// Use the system CA trust store — no cert files required.
+		// Credentials (e.g. SCRAM username/password) are encoded in the URI.
+		tlsConfig, err = constructSystemTLSConfig()
+		if err != nil {
+			return nil, err
+		}
+	case mongoConfig.CertWatcher != nil:
+		// Dynamic TLS with automatic client certificate rotation.
 		tlsConfig, err = constructDynamicTLSConfig(mongoConfig)
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	default:
+		// Static TLS loaded from cert files on disk.
 		tlsConfig, err = constructStaticTLSConfig(mongoConfig)
 		if err != nil {
 			return nil, err
@@ -648,6 +663,23 @@ func constructMongoClientOptions(
 	}
 
 	return clientOpts, nil
+}
+
+// constructSystemTLSConfig creates a TLS config that trusts the system CA pool.
+// Used when connecting to deployments with publicly trusted certificates (e.g. MongoDB Atlas).
+// No client certificate is loaded, so X.509 mutual auth is not performed.
+func constructSystemTLSConfig() (*tls.Config, error) {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load system CA cert pool: %w", err)
+	}
+
+	slog.Info("Using system CA trust store for TLS configuration")
+
+	return &tls.Config{
+		RootCAs:    pool,
+		MinVersion: tls.VersionTLS12,
+	}, nil
 }
 
 func constructDynamicTLSConfig(mongoConfig MongoDBConfig) (*tls.Config, error) {

@@ -84,6 +84,7 @@ func ConvertToMongoDBConfig(dbConfig config.DatabaseConfig) MongoDBConfig {
 		TotalCACertIntervalSeconds:       dbConfig.GetTimeoutConfig().GetCACertIntervalSeconds(),
 		ChangeStreamRetryDeadlineSeconds: dbConfig.GetTimeoutConfig().GetChangeStreamRetryDeadlineSeconds(),
 		ChangeStreamRetryIntervalSeconds: dbConfig.GetTimeoutConfig().GetChangeStreamRetryIntervalSeconds(),
+		UseSystemTLS:                     dbConfig.GetUseSystemTLS(),
 	}
 }
 

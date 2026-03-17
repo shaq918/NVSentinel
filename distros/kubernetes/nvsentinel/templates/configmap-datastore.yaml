@@ -81,6 +81,11 @@ data:
   # Legacy MongoDB environment variables for backward compatibility
   # These are set for all providers to support legacy code paths that still use the old config system
   {{- if eq .Values.global.datastore.provider "mongodb" }}
+  {{- if .Values.global.datastore.connection.uri }}
+  # Direct URI provided (e.g. MongoDB Atlas mongodb+srv://...). Password should be
+  # supplied via global.datastore.uriSecret to avoid storing credentials in a ConfigMap.
+  MONGODB_URI: {{ .Values.global.datastore.connection.uri | quote }}
+  {{- else }}
   {{- $mongodbURI := printf "mongodb://%s:%d/" .Values.global.datastore.connection.host (int (.Values.global.datastore.connection.port | default 27017)) }}
   {{- if .Values.global.datastore.connection.extraParams }}
   {{- $params := list }}
@@ -90,6 +95,8 @@ data:
   {{- $mongodbURI = printf "%s?%s" $mongodbURI (join "&" $params) }}
   {{- end }}
   MONGODB_URI: {{ $mongodbURI | quote }}
+  {{- end }}
+  MONGODB_USE_SYSTEM_TLS: {{ .Values.global.datastore.useSystemTLS | default false | quote }}
   {{- else }}
   # For non-MongoDB datastores, set empty MongoDB URI
   MONGODB_URI: ""

@@ -164,6 +164,11 @@ spec:
             - configMapRef:
                 name: {{ if .Values.global.datastore }}{{ .Release.Name }}-datastore-config{{ else }}mongodb-config{{ end }}
                 optional: true
+            {{- if and .Values.global.datastore .Values.global.datastore.uriSecretName }}
+            - secretRef:
+                name: {{ .Values.global.datastore.uriSecretName }}
+                optional: false
+            {{- end }}
       volumes:
       {{- if .Values.clientCertMountPath }}
       {{- if and .Values.global.datastore (eq .Values.global.datastore.provider "postgresql") }}

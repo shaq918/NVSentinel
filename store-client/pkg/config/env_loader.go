@@ -32,6 +32,9 @@ type DatabaseConfig interface {
 	GetCertConfig() CertificateConfig
 	GetTimeoutConfig() TimeoutConfig
 	GetAppName() string
+	// GetUseSystemTLS returns true when the client should use the system CA trust
+	// store instead of custom CA cert files (e.g. when connecting to MongoDB Atlas).
+	GetUseSystemTLS() bool
 }
 
 // CertificateConfig holds TLS certificate configuration
@@ -70,6 +73,10 @@ const (
 	EnvChangeStreamRetryIntervalSeconds = "CHANGE_STREAM_RETRY_INTERVAL_SECONDS"
 	// Certificate rotation configuration
 	EnvMongoDBEnableCertRotation = "MONGODB_ENABLE_CERT_ROTATION"
+	// EnvMongoDBUseSystemTLS instructs the client to use the system CA trust store
+	// instead of custom CA cert files. Set to "true" when connecting to MongoDB Atlas
+	// or other deployments that use publicly trusted certificates.
+	EnvMongoDBUseSystemTLS = "MONGODB_USE_SYSTEM_TLS"
 )
 
 // Default values that match existing module defaults for backward compatibility
@@ -115,6 +122,7 @@ type StandardDatabaseConfig struct {
 	certConfig     CertificateConfig
 	timeoutConfig  TimeoutConfig
 	appName        string
+	useSystemTLS   bool
 }
 
 // StandardCertificateConfig implements CertificateConfig
@@ -254,6 +262,7 @@ func NewDatabaseConfigWithCollection(
 		certConfig:     certConfig,
 		timeoutConfig:  timeoutConfig,
 		appName:        os.Getenv("APP_NAME"),
+		useSystemTLS:   stringutil.IsTruthyValue(os.Getenv(EnvMongoDBUseSystemTLS)),
 	}, nil
 }
 
@@ -501,6 +510,10 @@ func (c *StandardDatabaseConfig) GetTimeoutConfig() TimeoutConfig {
 
 func (c *StandardDatabaseConfig) GetAppName() string {
 	return c.appName
+}
+
+func (c *StandardDatabaseConfig) GetUseSystemTLS() bool {
+	return c.useSystemTLS
 }
 
 func (c *StandardCertificateConfig) GetCertPath() string {

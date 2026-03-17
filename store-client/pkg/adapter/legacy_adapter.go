@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nvidia/nvsentinel/commons/pkg/stringutil"
 	"github.com/nvidia/nvsentinel/store-client/pkg/config"
 	"github.com/nvidia/nvsentinel/store-client/pkg/datastore"
 )
@@ -141,6 +142,10 @@ func (l *LegacyDatabaseConfigAdapter) GetTimeoutConfig() config.TimeoutConfig {
 
 func (l *LegacyDatabaseConfigAdapter) GetAppName() string {
 	return os.Getenv("APP_NAME")
+}
+
+func (l *LegacyDatabaseConfigAdapter) GetUseSystemTLS() bool {
+	return stringutil.IsTruthyValue(os.Getenv(config.EnvMongoDBUseSystemTLS))
 }
 
 // LegacyCertConfigAdapter adapts DataStoreConfig certificate configuration

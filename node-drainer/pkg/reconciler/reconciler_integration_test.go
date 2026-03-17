@@ -162,6 +162,10 @@ func (m *mockDatabaseConfig) GetAppName() string {
 	return "node-drainer"
 }
 
+func (m *mockDatabaseConfig) GetUseSystemTLS() bool {
+	return false
+}
+
 // mockCertConfig is a simple mock implementation for testing
 type mockCertConfig struct{}
 

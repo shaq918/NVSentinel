@@ -154,6 +154,11 @@ spec:
             - configMapRef:
                 name: {{ if .Values.global.datastore }}{{ .Release.Name }}-datastore-config{{ else }}mongodb-config{{ end }}
                 optional: true
+            {{- if and .Values.global.datastore .Values.global.datastore.uriSecretName }}
+            - secretRef:
+                name: {{ .Values.global.datastore.uriSecretName }}
+                optional: false
+            {{- end }}
 
         - name: maintenance-notifier
           image: "{{ .Values.quarantineTriggerEngine.image.repository }}:{{ .Values.image.tag | default ((.Values.global).image).tag | default .Chart.AppVersion }}"
@@ -221,6 +226,11 @@ spec:
             - configMapRef:
                 name: {{ if .Values.global.datastore }}{{ .Release.Name }}-datastore-config{{ else }}mongodb-config{{ end }}
                 optional: true
+            {{- if and .Values.global.datastore .Values.global.datastore.uriSecretName }}
+            - secretRef:
+                name: {{ .Values.global.datastore.uriSecretName }}
+                optional: false
+            {{- end }}
       restartPolicy: Always
       {{- with (((.Values.global).systemNodeSelector) | default .Values.nodeSelector) }}
       nodeSelector:
