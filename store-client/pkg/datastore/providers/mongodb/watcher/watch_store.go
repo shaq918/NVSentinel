@@ -645,24 +645,29 @@ func constructMongoClientOptions(
 	}
 
 	// Only set TLS when TLS config was successfully built.
-	// Only set X.509 auth when client certificate is available (CA-only
-	// TLS should not attempt X.509 auth since there's no client cert).
-	// When certificate rotation is enabled, the client certificate is
-	// provided dynamically via GetClientCertificate rather than the
-	// Certificates slice.
-	if tlsConfig != nil {
-		clientOpts.SetTLSConfig(tlsConfig)
-
-		if len(tlsConfig.Certificates) > 0 || tlsConfig.GetClientCertificate != nil {
-			credential := options.Credential{
-				AuthMechanism: "MONGODB-X509",
-				AuthSource:    "$external",
-			}
-			clientOpts.SetAuth(credential)
-		}
-	}
+	applyTLSConfig(clientOpts, tlsConfig)
 
 	return clientOpts, nil
+}
+
+// applyTLSConfig sets TLS and X.509 auth on clientOpts when tlsConfig is non-nil.
+// X.509 auth is only set when a client certificate is available (CA-only TLS
+// should not attempt X.509 auth). When certificate rotation is enabled, the
+// client certificate is provided dynamically via GetClientCertificate rather
+// than the Certificates slice.
+func applyTLSConfig(clientOpts *options.ClientOptions, tlsConfig *tls.Config) {
+	if tlsConfig == nil {
+		return
+	}
+	clientOpts.SetTLSConfig(tlsConfig)
+
+	if len(tlsConfig.Certificates) > 0 || tlsConfig.GetClientCertificate != nil {
+		credential := options.Credential{
+			AuthMechanism: "MONGODB-X509",
+			AuthSource:    "$external",
+		}
+		clientOpts.SetAuth(credential)
+	}
 }
 
 // constructSystemTLSConfig creates a TLS config that trusts the system CA pool.
