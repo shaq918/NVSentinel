@@ -5,7 +5,7 @@ go 1.25.0
 toolchain go1.25.3
 
 require (
-	cloud.google.com/go/compute v1.55.0
+	cloud.google.com/go/compute v1.57.0
 	cloud.google.com/go/logging v1.13.2
 	github.com/BurntSushi/toml v1.6.0
 	github.com/aws/aws-sdk-go-v2 v1.41.4
