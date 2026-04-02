@@ -29,7 +29,7 @@ data:
     
     {{- range .Values.ruleSets }}
     [[rule-sets]]
-      enabled = {{ .enabled | default false }}
+      enabled = {{ .enabled | default true }}
       version = {{ .version | quote }}
       name = {{ .name | quote }}
       {{- if .match.all }}

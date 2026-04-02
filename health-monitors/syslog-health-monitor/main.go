@@ -118,11 +118,11 @@ func run() error {
 		return err
 	}
 
+	checks = applyKataConfig(checks)
+
 	for _, c := range checks {
 		ff.Set(metrics.ToSnakeCase(c.Name), true)
 	}
-
-	checks = applyKataConfig(checks)
 
 	monitor, pollingInterval, err := createSyslogMonitor(nodeName, checks, client)
 	if err != nil {

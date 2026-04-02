@@ -129,7 +129,7 @@ def cli(
 
     log.info(f"Event handling strategy configured to: {processing_strategy_value}")
 
-    metrics.set_flag("gpu-health-monitor", "store_only_mode", processing_strategy == "STORE_ONLY")
+    metrics.set_flag("store_only_mode", processing_strategy == "STORE_ONLY")
     metrics.set_flag("dcgm_k8s_service_enabled", dcgm_k8s_service_enabled)
 
     log.info("Initialization completed")

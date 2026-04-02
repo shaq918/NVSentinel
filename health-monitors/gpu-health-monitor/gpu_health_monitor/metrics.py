@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Expose runtime feature toggles as a Prometheus gauge metric
-(nvsentinel_feature_flag_enabled) for observability. """
+(nvsentinel_feature_flag_enabled) for observability."""
 
 from prometheus_client import Gauge
 
