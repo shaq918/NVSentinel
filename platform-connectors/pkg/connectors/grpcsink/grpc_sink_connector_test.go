@@ -135,7 +135,7 @@ func TestFetchAndProcessHealthMetric_Success(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
-func TestMessageRetriedOnGRPCFailure(t *testing.T) {
+func TestFetchAndProcessHealthMetric_RetryOnGRPCFailure_EventuallyProcessed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -177,7 +177,7 @@ func TestMessageRetriedOnGRPCFailure(t *testing.T) {
 	cancel()
 }
 
-func TestMessageDroppedAfterMaxRetries(t *testing.T) {
+func TestFetchAndProcessHealthMetric_MaxRetries_EventDropped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -218,17 +218,25 @@ func TestMessageDroppedAfterMaxRetries(t *testing.T) {
 	cancel()
 }
 
-func TestShutdownRingBuffer(t *testing.T) {
+func TestShutdownRingBuffer_AfterShutdown_EnqueueIsNoOp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	rb := ringbuffer.NewRingBuffer("testShutdown", ctx)
 	connector := &GRPCSinkConnector{ringBuffer: rb}
 
-	require.Eventually(t, func() bool {
+	done := make(chan struct{})
+	go func() {
 		connector.ShutdownRingBuffer()
-		return true
-	}, 1*time.Second, 10*time.Millisecond, "ShutdownRingBuffer should not hang")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// ShutdownRingBuffer completed successfully
+	case <-time.After(1 * time.Second):
+		t.Fatal("ShutdownRingBuffer did not complete within timeout")
+	}
 
 	// Enqueue after shutdown is a no-op; queue length stays 0
 	rb.Enqueue(&protos.HealthEvents{})

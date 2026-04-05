@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	StatusSuccess = "success"
-	StatusFailed  = "failed"
+	statusSuccess = "success"
+	statusFailed  = "failed"
 )
 
 var (

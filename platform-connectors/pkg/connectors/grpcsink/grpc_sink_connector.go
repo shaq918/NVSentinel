@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package grpcsink provides a connector that forwards HealthEvent protos
+// to an external gRPC server using the PlatformConnector service.
 package grpcsink
 
 import (
@@ -29,6 +31,8 @@ import (
 
 const defaultRPCTimeout = 10 * time.Second
 
+// GRPCSinkConnector forwards health events to an external gRPC server
+// via the PlatformConnector HealthEventOccurredV1 RPC.
 type GRPCSinkConnector struct {
 	client     pb.PlatformConnectorClient
 	conn       *grpc.ClientConn
@@ -37,13 +41,17 @@ type GRPCSinkConnector struct {
 	rpcTimeout time.Duration
 }
 
+// InitializeGRPCSinkConnector creates a new gRPC sink connector that dials the
+// given target address. The connection uses insecure credentials because the
+// target is reachable only from the cluster's internal network, matching the
+// trust model of the health-monitor to platform-connector UDS path.
+// Failed sends are retried up to maxRetries times via the ring buffer's
+// exponential backoff before being dropped.
 func InitializeGRPCSinkConnector(
 	ringBuffer *ringbuffer.RingBuffer,
 	target string,
 	maxRetries int,
 ) (*GRPCSinkConnector, error) {
-	// Insecure transport:  the gRPC server is reachable only from the cluster's internal network. This matches the trust model of the health-monitor → platform-connector
-	// UDS path, which also uses insecure gRPC credentials.
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client for target %s: %w", target, err)
@@ -62,6 +70,9 @@ func InitializeGRPCSinkConnector(
 	}, nil
 }
 
+// FetchAndProcessHealthMetric dequeues health events from the ring buffer and
+// forwards them to the gRPC target. It blocks until the context is canceled or
+// the ring buffer signals shutdown.
 func (g *GRPCSinkConnector) FetchAndProcessHealthMetric(ctx context.Context) {
 	for {
 		select {
@@ -121,11 +132,11 @@ func (g *GRPCSinkConnector) sendHealthEvents(ctx context.Context, healthEvents *
 	grpcSinkSendDuration.Observe(float64(duration.Milliseconds()))
 
 	if err != nil {
-		grpcSinkSendCounter.WithLabelValues(StatusFailed).Inc()
+		grpcSinkSendCounter.WithLabelValues(statusFailed).Inc()
 		return fmt.Errorf("failed to forward health events to gRPC sink: %w", err)
 	}
 
-	grpcSinkSendCounter.WithLabelValues(StatusSuccess).Inc()
+	grpcSinkSendCounter.WithLabelValues(statusSuccess).Inc()
 
 	slog.Debug("Successfully forwarded health events to gRPC sink",
 		"eventCount", len(healthEvents.GetEvents()),
@@ -134,6 +145,7 @@ func (g *GRPCSinkConnector) sendHealthEvents(ctx context.Context, healthEvents *
 	return nil
 }
 
+// ShutdownRingBuffer drains the ring buffer and stops the processing loop.
 func (g *GRPCSinkConnector) ShutdownRingBuffer() {
 	if g.ringBuffer != nil {
 		slog.Info("Shutting down gRPC sink connector ring buffer with drain")
@@ -142,6 +154,7 @@ func (g *GRPCSinkConnector) ShutdownRingBuffer() {
 	}
 }
 
+// Close closes the underlying gRPC client connection.
 func (g *GRPCSinkConnector) Close() error {
 	if g.conn != nil {
 		return g.conn.Close()
