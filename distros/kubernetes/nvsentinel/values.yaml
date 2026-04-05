@@ -215,6 +215,11 @@ platformConnector:
   postgresqlStore:
     clientCertMountPath: "/etc/ssl/client-certs"
 
+  grpcSinkConnector:
+    enabled: false
+    target: ""  # Set to INTERNAL_DNS_NAME:port during cluster bootstrap
+    maxRetries: 3
+
   k8sConnector:
     enabled: true
     maxNodeConditionMessageLength: 1024

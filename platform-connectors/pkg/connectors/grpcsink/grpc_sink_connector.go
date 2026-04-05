@@ -1,0 +1,150 @@
+// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package grpcsink
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	pb "github.com/nvidia/nvsentinel/data-models/pkg/protos"
+	"github.com/nvidia/nvsentinel/platform-connectors/pkg/ringbuffer"
+)
+
+const defaultRPCTimeout = 10 * time.Second
+
+type GRPCSinkConnector struct {
+	client     pb.PlatformConnectorClient
+	conn       *grpc.ClientConn
+	ringBuffer *ringbuffer.RingBuffer
+	maxRetries int
+	rpcTimeout time.Duration
+}
+
+func InitializeGRPCSinkConnector(
+	ringBuffer *ringbuffer.RingBuffer,
+	target string,
+	maxRetries int,
+) (*GRPCSinkConnector, error) {
+	// Insecure transport:  the gRPC server is reachable only from the cluster's internal network. This matches the trust model of the health-monitor → platform-connector
+	// UDS path, which also uses insecure gRPC credentials.
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC client for target %s: %w", target, err)
+	}
+
+	client := pb.NewPlatformConnectorClient(conn)
+
+	slog.Info("Initialized gRPC sink connector", "target", target, "maxRetries", maxRetries)
+
+	return &GRPCSinkConnector{
+		client:     client,
+		conn:       conn,
+		ringBuffer: ringBuffer,
+		maxRetries: maxRetries,
+		rpcTimeout: defaultRPCTimeout,
+	}, nil
+}
+
+func (g *GRPCSinkConnector) FetchAndProcessHealthMetric(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("Context canceled, exiting gRPC sink processing loop")
+			return
+		default:
+			healthEvents, quit := g.ringBuffer.Dequeue()
+			if quit {
+				slog.Info("Queue signaled shutdown, exiting gRPC sink processing loop")
+				return
+			}
+
+			if healthEvents == nil || len(healthEvents.GetEvents()) == 0 {
+				g.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
+				continue
+			}
+
+			err := g.sendHealthEvents(ctx, healthEvents)
+			if err != nil {
+				retryCount := g.ringBuffer.NumRequeues(healthEvents)
+				if retryCount < g.maxRetries {
+					slog.Warn("Error forwarding health events to gRPC sink, will retry with exponential backoff",
+						"error", err,
+						"retryCount", retryCount,
+						"maxRetries", g.maxRetries,
+						"eventCount", len(healthEvents.GetEvents()))
+
+					grpcSinkRetryCounter.Inc()
+					g.ringBuffer.AddRateLimited(healthEvents)
+				} else {
+					slog.Error("Max retries exceeded, dropping health events permanently",
+						"error", err,
+						"retryCount", retryCount,
+						"maxRetries", g.maxRetries,
+						"eventCount", len(healthEvents.GetEvents()),
+						"firstEventNodeName", healthEvents.GetEvents()[0].GetNodeName(),
+						"firstEventCheckName", healthEvents.GetEvents()[0].GetCheckName())
+					g.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
+				}
+			} else {
+				g.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
+			}
+		}
+	}
+}
+
+func (g *GRPCSinkConnector) sendHealthEvents(ctx context.Context, healthEvents *pb.HealthEvents) error {
+	start := time.Now()
+
+	rpcCtx, cancel := context.WithTimeout(ctx, g.rpcTimeout)
+	defer cancel()
+
+	_, err := g.client.HealthEventOccurredV1(rpcCtx, healthEvents)
+
+	duration := time.Since(start)
+	grpcSinkSendDuration.Observe(float64(duration.Milliseconds()))
+
+	if err != nil {
+		grpcSinkSendCounter.WithLabelValues(StatusFailed).Inc()
+		return fmt.Errorf("failed to forward health events to gRPC sink: %w", err)
+	}
+
+	grpcSinkSendCounter.WithLabelValues(StatusSuccess).Inc()
+
+	slog.Debug("Successfully forwarded health events to gRPC sink",
+		"eventCount", len(healthEvents.GetEvents()),
+		"durationMs", duration.Milliseconds())
+
+	return nil
+}
+
+func (g *GRPCSinkConnector) ShutdownRingBuffer() {
+	if g.ringBuffer != nil {
+		slog.Info("Shutting down gRPC sink connector ring buffer with drain")
+		g.ringBuffer.ShutDownHealthMetricQueue()
+		slog.Info("gRPC sink connector ring buffer drained successfully")
+	}
+}
+
+func (g *GRPCSinkConnector) Close() error {
+	if g.conn != nil {
+		return g.conn.Close()
+	}
+	return nil
+}

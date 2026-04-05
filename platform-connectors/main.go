@@ -35,6 +35,7 @@ import (
 	"github.com/nvidia/nvsentinel/commons/pkg/logger"
 	srv "github.com/nvidia/nvsentinel/commons/pkg/server"
 	pb "github.com/nvidia/nvsentinel/data-models/pkg/protos"
+	"github.com/nvidia/nvsentinel/platform-connectors/pkg/connectors/grpcsink"
 	"github.com/nvidia/nvsentinel/platform-connectors/pkg/connectors/kubernetes"
 	"github.com/nvidia/nvsentinel/platform-connectors/pkg/connectors/store"
 	"github.com/nvidia/nvsentinel/platform-connectors/pkg/pipeline"
@@ -255,22 +256,53 @@ func startGRPCServer(
 	return lis, nil
 }
 
+func initializeGRPCSinkConnector(
+	ctx context.Context,
+	config map[string]interface{},
+) (*grpcsink.GRPCSinkConnector, error) {
+	ringBuffer := ringbuffer.NewRingBuffer("grpcSink", ctx)
+	server.InitializeAndAttachRingBufferForConnectors(ringBuffer)
+
+	target, ok := config["GRPCSinkTarget"].(string)
+	if !ok || target == "" {
+		return nil, fmt.Errorf("grpcSinkTarget not configured or empty")
+	}
+
+	maxRetriesInt64, ok := config["GRPCSinkConnectorMaxRetries"].(int64)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert GRPCSinkConnectorMaxRetries to int: %v",
+			config["GRPCSinkConnectorMaxRetries"])
+	}
+
+	maxRetries := int(maxRetriesInt64)
+
+	connector, err := grpcsink.InitializeGRPCSinkConnector(ringBuffer, target, maxRetries)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize gRPC sink connector: %w", err)
+	}
+
+	go connector.FetchAndProcessHealthMetric(ctx)
+
+	return connector, nil
+}
+
 func initializeConnectors(
 	ctx context.Context,
 	config map[string]interface{},
 	stopCh chan struct{},
 	databaseClientCertMountPath string,
-) (*ringbuffer.RingBuffer, *store.DatabaseStoreConnector, error) {
+) (*ringbuffer.RingBuffer, *store.DatabaseStoreConnector, *grpcsink.GRPCSinkConnector, error) {
 	var (
-		k8sRingBuffer  *ringbuffer.RingBuffer
-		storeConnector *store.DatabaseStoreConnector
-		err            error
+		k8sRingBuffer      *ringbuffer.RingBuffer
+		storeConnector     *store.DatabaseStoreConnector
+		grpcSinkConnector  *grpcsink.GRPCSinkConnector
+		err                error
 	)
 
 	if config["enableK8sPlatformConnector"] == True {
 		k8sRingBuffer, err = initializeK8sConnector(ctx, config, stopCh)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize K8s connector: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize K8s connector: %w", err)
 		}
 	}
 
@@ -278,11 +310,18 @@ func initializeConnectors(
 	if config["enableMongoDBStorePlatformConnector"] == True || config["enablePostgresDBStorePlatformConnector"] == True {
 		storeConnector, err = initializeDatabaseStoreConnector(ctx, config, databaseClientCertMountPath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize database store connector: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize database store connector: %w", err)
 		}
 	}
 
-	return k8sRingBuffer, storeConnector, nil
+	if config["enableGRPCSinkConnector"] == True {
+		grpcSinkConnector, err = initializeGRPCSinkConnector(ctx, config)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to initialize gRPC sink connector: %w", err)
+		}
+	}
+
+	return k8sRingBuffer, storeConnector, grpcSinkConnector, nil
 }
 
 func cleanupResources(
@@ -290,6 +329,7 @@ func cleanupResources(
 	lis net.Listener,
 	k8sRingBuffer *ringbuffer.RingBuffer,
 	storeConnector *store.DatabaseStoreConnector,
+	grpcSinkConnector *grpcsink.GRPCSinkConnector,
 ) error {
 	if lis != nil {
 		if k8sRingBuffer != nil {
@@ -313,6 +353,14 @@ func cleanupResources(
 
 		if err := storeConnector.Disconnect(disconnectCtx); err != nil {
 			return fmt.Errorf("error disconnecting database store connector: %w", err)
+		}
+	}
+
+	if grpcSinkConnector != nil {
+		grpcSinkConnector.ShutdownRingBuffer()
+
+		if err := grpcSinkConnector.Close(); err != nil {
+			slog.Error("Failed to close gRPC sink connector", "error", err)
 		}
 	}
 
@@ -372,7 +420,7 @@ func run() error {
 		return err
 	}
 
-	k8sRingBuffer, storeConnector, err := initializeConnectors(ctx,
+	k8sRingBuffer, storeConnector, grpcSinkConnector, err := initializeConnectors(ctx,
 		config, stopCh, cfg.databaseClientCertMountPath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize connectors: %w", err)
@@ -426,7 +474,7 @@ func run() error {
 
 		close(stopCh)
 
-		if err := cleanupResources(cfg.socket, lis, k8sRingBuffer, storeConnector); err != nil {
+		if err := cleanupResources(cfg.socket, lis, k8sRingBuffer, storeConnector, grpcSinkConnector); err != nil {
 			return err
 		}
 
