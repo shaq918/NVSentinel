@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	pb "github.com/nvidia/nvsentinel/data-models/pkg/protos"
 	"github.com/nvidia/nvsentinel/platform-connectors/pkg/ringbuffer"
@@ -41,25 +44,34 @@ type GRPCSinkConnector struct {
 	rpcTimeout time.Duration
 }
 
-// InitializeGRPCSinkConnector creates a new gRPC sink connector that dials the
-// given target address. The connection uses insecure credentials because the
-// target is reachable only from the cluster's internal network, matching the
-// trust model of the health-monitor to platform-connector UDS path.
-// Failed sends are retried up to maxRetries times via the ring buffer's
-// exponential backoff before being dropped.
+// InitializeGRPCSinkConnector creates a connector that dials the given target
+// using insecure credentials (cluster-internal network). If tokenPath is
+// non-empty, a Kubernetes ServiceAccount bearer token is attached to every RPC
+// (same pattern as janitor → janitor-provider, ADR-030).
 func InitializeGRPCSinkConnector(
 	ringBuffer *ringbuffer.RingBuffer,
 	target string,
 	maxRetries int,
+	tokenPath string,
 ) (*GRPCSinkConnector, error) {
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	dialOpts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+
+	if tokenPath != "" {
+		slog.Info("Enabling SA token authentication for gRPC sink", "tokenPath", tokenPath)
+		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(tokenInterceptor(tokenPath)))
+	}
+
+	conn, err := grpc.NewClient(target, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client for target %s: %w", target, err)
 	}
 
 	client := pb.NewPlatformConnectorClient(conn)
 
-	slog.Info("Initialized gRPC sink connector", "target", target, "maxRetries", maxRetries)
+	slog.Info("Initialized gRPC sink connector",
+		"target", target, "maxRetries", maxRetries, "authEnabled", tokenPath != "")
 
 	return &GRPCSinkConnector{
 		client:     client,
@@ -71,8 +83,8 @@ func InitializeGRPCSinkConnector(
 }
 
 // FetchAndProcessHealthMetric dequeues health events from the ring buffer and
-// forwards them to the gRPC target. It blocks until the context is canceled or
-// the ring buffer signals shutdown.
+// forwards them to the gRPC target. Blocks until ctx is canceled or the ring
+// buffer signals shutdown.
 func (g *GRPCSinkConnector) FetchAndProcessHealthMetric(ctx context.Context) {
 	for {
 		select {
@@ -143,6 +155,35 @@ func (g *GRPCSinkConnector) sendHealthEvents(ctx context.Context, healthEvents *
 		"durationMs", duration.Milliseconds())
 
 	return nil
+}
+
+// tokenInterceptor returns a gRPC unary client interceptor that reads a
+// ServiceAccount token from tokenPath on every call and attaches it as a
+// Bearer token in the "authorization" gRPC metadata header.
+// The token is re-read on each invocation to handle Kubernetes token rotation.
+//
+// TODO: extract to commons/pkg/grpcclient and share with janitor/pkg/client.TokenInterceptor
+// which has identical logic. See janitor/pkg/client/grpc_auth.go.
+func tokenInterceptor(tokenPath string) grpc.UnaryClientInterceptor {
+	return func(
+		ctx context.Context,
+		method string,
+		req, reply any,
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		//nolint:gosec // G304: tokenPath is operator-controlled config, not user input.
+		tokenBytes, err := os.ReadFile(tokenPath)
+		if err != nil {
+			return fmt.Errorf("reading SA token from %q: %w", tokenPath, err)
+		}
+
+		token := strings.TrimSpace(string(tokenBytes))
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
 }
 
 // ShutdownRingBuffer drains the ring buffer and stops the processing loop.

@@ -276,7 +276,10 @@ func initializeGRPCSinkConnector(
 
 	maxRetries := int(maxRetriesInt64)
 
-	connector, err := grpcsink.InitializeGRPCSinkConnector(ringBuffer, target, maxRetries)
+	// Optional SA token auth — empty string disables it
+	tokenPath, _ := config["GRPCSinkTokenPath"].(string)
+
+	connector, err := grpcsink.InitializeGRPCSinkConnector(ringBuffer, target, maxRetries, tokenPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize gRPC sink connector: %w", err)
 	}

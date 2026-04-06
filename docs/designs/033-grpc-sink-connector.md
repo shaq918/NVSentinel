@@ -32,6 +32,10 @@ today, both lossy:
    PostgreSQL instance, coupling the external system to NVSentinel's internal
    storage layer.
 
+3. **Event exporter** — the existing event-exporter module can forward events
+   to an external HTTP endpoint, but it reads from the database (MongoDB or
+   PostgreSQL), so it still requires in-cluster state persistence.
+
 ## Solution
 
 Add a third connector — the **gRPC sink connector** — that forwards the full
@@ -50,7 +54,7 @@ no truncation.
 
 ## Architecture
 
-```
+```text
 Health Monitors (5+ types)
         |
     [UDS Socket]
@@ -63,7 +67,7 @@ Health Monitors (5+ types)
         |--- K8s Ring Buffer ---> K8s Connector (node conditions)
         |--- Store Ring Buffer -> Store Connector (MongoDB/PostgreSQL)
         |--- gRPC Ring Buffer --> gRPC Sink Connector (external server)  <-- NEW
-```text
+```
 
 Each connector has its own ring buffer with independent retry logic. If the
 gRPC sink target is unreachable, only its buffer backs up — the store and K8s
@@ -79,6 +83,7 @@ platformConnector:
     enabled: false
     target: ""         # gRPC server address, e.g. "my-service.example.com:50051"
     maxRetries: 3      # Retry attempts with exponential backoff before dropping
+    tokenPath: ""      # Optional: SA token path for bearer auth (empty = disabled)
 ```
 
 The per-RPC timeout is fixed at 10 seconds. If the target does not respond
@@ -89,15 +94,25 @@ buffer's exponential backoff.
 
 The gRPC sink target is expected to be a component within the same cluster,
 outside of NVSentinel but still within the cluster's internal network. The
-connector uses insecure credentials (`insecure.NewCredentials()`), consistent
-with all other internal NVSentinel gRPC connections (health monitors,
+connector uses insecure credentials (`insecure.NewCredentials()`) by default,
+consistent with all other internal NVSentinel gRPC connections (health monitors,
 health-events-analyzer, metadata-collector).
 
-The only NVSentinel component that uses TLS + auth for gRPC is the
-janitor → janitor-provider connection (ADR-030), which was secured because
-it exposes destructive CSP operations. The gRPC sink forwards read-only
-health event data — no cluster-modifying operations are exposed on the
-receiving end.
+For deployments that require authentication, the connector supports optional
+Kubernetes ServiceAccount bearer token auth — the same pattern used by the
+janitor → janitor-provider connection (ADR-030). When `tokenPath` is configured,
+the connector reads a projected SA token and attaches it as a Bearer header on
+every RPC. The receiving server can validate the token via the Kubernetes
+TokenReview API.
+
+```yaml
+grpcSinkConnector:
+  tokenPath: "/var/run/secrets/nvsentinel/grpcsink/token"  # enable auth
+  # tokenPath: ""  # disable auth (default)
+```
+
+Network policies are also recommended to restrict which pods can connect
+to the target service.
 
 ## Use Cases
 

@@ -32,6 +32,7 @@ data:
       ,"enableGRPCSinkConnector": "{{ .Values.platformConnector.grpcSinkConnector.enabled }}"
       ,"GRPCSinkTarget": "{{ .Values.platformConnector.grpcSinkConnector.target }}"
       ,"GRPCSinkConnectorMaxRetries": {{ .Values.platformConnector.grpcSinkConnector.maxRetries }}
+      ,"GRPCSinkTokenPath": "{{ .Values.platformConnector.grpcSinkConnector.tokenPath }}"
       {{- with .Values.platformConnector.pipeline }}
       ,"pipeline": {{ . | toJson }}
       {{- end }}

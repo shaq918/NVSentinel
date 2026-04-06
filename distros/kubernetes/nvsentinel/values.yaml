@@ -225,6 +225,10 @@ platformConnector:
     # Number of retry attempts (with exponential backoff) before dropping an event.
     # Total send attempts = 1 initial + maxRetries retries.
     maxRetries: 3
+    # Optional: path to a projected Kubernetes ServiceAccount token for
+    # bearer token authentication.
+    # Leave empty to disable authentication.
+    tokenPath: ""
 
   k8sConnector:
     enabled: true
