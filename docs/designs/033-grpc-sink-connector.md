@@ -63,7 +63,7 @@ Health Monitors (5+ types)
         |--- K8s Ring Buffer ---> K8s Connector (node conditions)
         |--- Store Ring Buffer -> Store Connector (MongoDB/PostgreSQL)
         |--- gRPC Ring Buffer --> gRPC Sink Connector (external server)  <-- NEW
-```
+```text
 
 Each connector has its own ring buffer with independent retry logic. If the
 gRPC sink target is unreachable, only its buffer backs up — the store and K8s
@@ -80,6 +80,24 @@ platformConnector:
     target: ""         # gRPC server address, e.g. "my-service.example.com:50051"
     maxRetries: 3      # Retry attempts with exponential backoff before dropping
 ```
+
+The per-RPC timeout is fixed at 10 seconds. If the target does not respond
+within this window, the send is treated as a failure and retried via the ring
+buffer's exponential backoff.
+
+## Security
+
+The gRPC sink target is expected to be a component within the same cluster,
+outside of NVSentinel but still within the cluster's internal network. The
+connector uses insecure credentials (`insecure.NewCredentials()`), consistent
+with all other internal NVSentinel gRPC connections (health monitors,
+health-events-analyzer, metadata-collector).
+
+The only NVSentinel component that uses TLS + auth for gRPC is the
+janitor → janitor-provider connection (ADR-030), which was secured because
+it exposes destructive CSP operations. The gRPC sink forwards read-only
+health event data — no cluster-modifying operations are exposed on the
+receiving end.
 
 ## Use Cases
 
