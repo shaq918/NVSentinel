@@ -296,10 +296,10 @@ func initializeConnectors(
 	databaseClientCertMountPath string,
 ) (*ringbuffer.RingBuffer, *store.DatabaseStoreConnector, *grpcsink.GRPCSinkConnector, error) {
 	var (
-		k8sRingBuffer      *ringbuffer.RingBuffer
-		storeConnector     *store.DatabaseStoreConnector
-		grpcSinkConnector  *grpcsink.GRPCSinkConnector
-		err                error
+		k8sRingBuffer     *ringbuffer.RingBuffer
+		storeConnector    *store.DatabaseStoreConnector
+		grpcSinkConnector *grpcsink.GRPCSinkConnector
+		err               error
 	)
 
 	if config["enableK8sPlatformConnector"] == True {

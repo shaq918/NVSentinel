@@ -200,5 +200,6 @@ func (g *GRPCSinkConnector) Close() error {
 	if g.conn != nil {
 		return g.conn.Close()
 	}
+
 	return nil
 }
