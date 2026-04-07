@@ -124,7 +124,7 @@ func TestFetchAndProcessHealthMetric_Success(t *testing.T) {
 		}},
 	}
 
-	rb.Enqueue(healthEvents)
+	rb.Enqueue(ringbuffer.NewQueuedHealthEvents(healthEvents))
 	require.Equal(t, 1, rb.CurrentLength())
 
 	go connector.FetchAndProcessHealthMetric(ctx)
@@ -166,7 +166,7 @@ func TestFetchAndProcessHealthMetric_RetryOnGRPCFailure_EventuallyProcessed(t *t
 		}},
 	}
 
-	rb.Enqueue(healthEvents)
+	rb.Enqueue(ringbuffer.NewQueuedHealthEvents(healthEvents))
 	require.Equal(t, 1, rb.CurrentLength())
 
 	go connector.FetchAndProcessHealthMetric(ctx)
@@ -206,7 +206,7 @@ func TestFetchAndProcessHealthMetric_MaxRetries_EventDropped(t *testing.T) {
 		}},
 	}
 
-	rb.Enqueue(healthEvents)
+	rb.Enqueue(ringbuffer.NewQueuedHealthEvents(healthEvents))
 	require.Equal(t, 1, rb.CurrentLength())
 
 	go connector.FetchAndProcessHealthMetric(ctx)
@@ -243,7 +243,7 @@ func TestShutdownRingBuffer_AfterShutdown_EnqueueIsNoOp(t *testing.T) {
 	}
 
 	// Enqueue after shutdown is a no-op; queue length stays 0
-	rb.Enqueue(&protos.HealthEvents{})
+	rb.Enqueue(ringbuffer.NewQueuedHealthEvents(&protos.HealthEvents{}))
 	require.Equal(t, 0, rb.CurrentLength())
 }
 

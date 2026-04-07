@@ -92,41 +92,41 @@ func (g *GRPCSinkConnector) FetchAndProcessHealthMetric(ctx context.Context) {
 			slog.Info("Context canceled, exiting gRPC sink processing loop")
 			return
 		default:
-			healthEvents, quit := g.ringBuffer.Dequeue()
+			queued, quit := g.ringBuffer.Dequeue()
 			if quit {
 				slog.Info("Queue signaled shutdown, exiting gRPC sink processing loop")
 				return
 			}
 
-			if healthEvents == nil || len(healthEvents.GetEvents()) == 0 {
-				g.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
+			if queued == nil || queued.Events == nil || len(queued.Events.GetEvents()) == 0 {
+				g.ringBuffer.HealthMetricEleProcessingCompleted(queued)
 				continue
 			}
 
-			err := g.sendHealthEvents(ctx, healthEvents)
+			err := g.sendHealthEvents(ctx, queued.Events)
 			if err != nil {
-				retryCount := g.ringBuffer.NumRequeues(healthEvents)
+				retryCount := g.ringBuffer.NumRequeues(queued)
 				if retryCount < g.maxRetries {
 					slog.Warn("Error forwarding health events to gRPC sink, will retry with exponential backoff",
 						"error", err,
 						"retryCount", retryCount,
 						"maxRetries", g.maxRetries,
-						"eventCount", len(healthEvents.GetEvents()))
+						"eventCount", len(queued.Events.GetEvents()))
 
 					grpcSinkRetryCounter.Inc()
-					g.ringBuffer.AddRateLimited(healthEvents)
+					g.ringBuffer.AddRateLimited(queued)
 				} else {
 					slog.Error("Max retries exceeded, dropping health events permanently",
 						"error", err,
 						"retryCount", retryCount,
 						"maxRetries", g.maxRetries,
-						"eventCount", len(healthEvents.GetEvents()),
-						"firstEventNodeName", healthEvents.GetEvents()[0].GetNodeName(),
-						"firstEventCheckName", healthEvents.GetEvents()[0].GetCheckName())
-					g.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
+						"eventCount", len(queued.Events.GetEvents()),
+						"firstEventNodeName", queued.Events.GetEvents()[0].GetNodeName(),
+						"firstEventCheckName", queued.Events.GetEvents()[0].GetCheckName())
+					g.ringBuffer.HealthMetricEleProcessingCompleted(queued)
 				}
 			} else {
-				g.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
+				g.ringBuffer.HealthMetricEleProcessingCompleted(queued)
 			}
 		}
 	}
